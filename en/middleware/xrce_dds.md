@@ -42,7 +42,7 @@ When PX4 is built, a code generator uses the uORB message definitions in the sou
 PX4 main or release builds automatically export the set of uORB messages definitions in the build to an associated branch in [PX4/px4_msgs](https://github.com/PX4/px4_msgs).
 
 ROS 2 applications need to be built in a workspace that includes the _same_ message definitions that were used to create the XRCE-DDS client module in the PX4 Firmware.
-These can be included into a workspace by cloning the [PX4/px4_msgs](https://github.com/PX4/px4_msgs) into your ROS 2 workspace and switching to the appropriate branch.
+These can be included into a workspace by cloning the interface package [PX4/px4_msgs](https://github.com/PX4/px4_msgs) into your ROS 2 workspace and switching to the appropriate branch.
 Note that all code generation associated with the messages is handled by ROS 2.
 
 
@@ -243,20 +243,81 @@ While most releases should support a very similar set of messages, to be certain
 
 Note that ROS 2/DDS needs to have the _same_ message definitions that were used to create the XRCE-DDS client module in the PX4 Firmware in order to interpret the messages:
 
-- If you're using a main or release version of PX4 you can get these by cloning [PX4/px4_msgs](https://github.com/PX4/px4_msgs) into your workspace (branches are provided for each release).
-- If you're creating your own new topic you will need to update [dds_topics.yaml](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/microdds_client/dds_topics.yaml) and also copy the message definitions out of PX4 source tree into any ROS 2 workspace that needs them.
-  The messages must be in a folder named `px4_msgs/msg/`.
+- If you're using a main or release version of PX4 you can get these by cloning the interface package [PX4/px4_msgs](https://github.com/PX4/px4_msgs) into your workspace (branches are provided for each release).
+- If you're creating your own new topics e/o uORB messages you will need to update [dds_topics.yaml](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/microdds_client/dds_topics.yaml) and also copy the new/modified message definitions from `PX4/PX4-Autopilot/msg` to `PX4/px4-msgs/msg`. 
   
   :::note
-  Technically the messages must be in a folder defined by the `type` prefix in the yaml file:
-  As you can see below, this is `px4_msgs::msg::`:
-  
-  ```yaml
-  - topic: /fmu/out/vehicle_odometry
-    type: px4_msgs::msg::VehicleOdometry
+  Technically, [dds_topics.yaml](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/microdds_client/dds_topics.yaml) completely defines the pairing between PX4 message and topics and the ROS 2 ones.
+  Its structure is as follows:
   ```
+  publications:
+
+    - topic: /fmu/out/collision_constraints
+      type: px4_msgs::msg::CollisionConstraints
+
+    ...  
+
+    - topic: /fmu/out/vehicle_odometry
+      type: px4_msgs::msg::VehicleOdometry
+
+    - topic: /fmu/out/vehicle_status
+      type: px4_msgs::msg::VehicleStatus
+
+    - topic: /fmu/out/vehicle_trajectory_waypoint_desired
+      type: px4_msgs::msg::VehicleTrajectoryWaypoint
+
+  subscriptions:
+
+    - topic: /fmu/in/offboard_control_mode
+      type: px4_msgs::msg::OffboardControlMode
+
+    ...
+
+    - topic: /fmu/in/vehicle_trajectory_waypoint
+      type: px4_msgs::msg::VehicleTrajectoryWaypoint
+  ```
+  
+  Each (`topic`,`type`) pairs defines
+
+  1. A new subscription or publication depending on with list it is added.
+  1. The topic _base name_, which MUST coincide with the desired uORB topic name that you want to publish/subscribe.
+     It is identified by the last token in `topic:` that starts with `/` and does not contains any `/` in it.
+     `vehicle_odometry`, `vehicle_status` and `offboard_control_mode` are examples of base names.
+  1. The topic [namespace](https://design.ros2.org/articles/topic_and_service_names.html#namespaces). 
+     By default it is set to
+      - `/fmu/out/` for topic that are _published_ by PX4.
+      - `/fmu/in/` for topic that are _subscirbed_ by PX4.
+  1. The message type (`VehicleOdometry`, `VehicleStatus`, `OffboardControlMode`, ecc) and the ROS 2 package (`px4_msgs`) that is expected to provide the message definition.
+
+  You can arbitrary change the configuration.
+  For example, you could use different default namespaces or use a custom package to store the message definitions. 
   :::
 
+
+### Customizing the topic namespace
+
+Custom topic namespaces can be applied at build time (changing [dds_topics.yaml](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/microdds_client/dds_topics.yaml)) or at runtime (useful for multi vehicle operations):
+
+ - One possibility is to use the `-n` option when starting the [microdds-client](../modules/modules_system.md#microdds-client) from command line. This technique can be used both in simulation and real vehicles.
+ - Only in simulation, where the client is automatically started, a custom namespace can be provided setting the environment variable `PX4_MICRODDS_NS` before starting the simulation.
+
+
+:::note
+Changing the namespace at runtime will append the desired namespace as a prefix to all `topic` fields in [dds_topics.yaml](https://github.com/PX4/PX4-Autopilot/blob/main/src/modules/microdds_client/dds_topics.yaml).
+Therefore, commands like
+```sh
+microdds_client start -n uav_1
+```
+or
+```sh
+PX4_MICRODDS_NS=uav_1 make px4_sitl gz_x500
+```
+will generate topics under the namespaces
+```sh
+/uav_1/fmu/in/  # for subscribers
+/uav_1/fmu/out/ # for publishers
+```
+:::
 
 ### PX4 ROS 2 QoS Settings
 
